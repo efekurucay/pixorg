@@ -16,11 +16,12 @@ class Config:
     GOOGLE_DISCOVERY_URL = "https://accounts.google.com/.well-known/openid-configuration"
     PHOTOS_SCOPE = [
         "https://www.googleapis.com/auth/photoslibrary",
+        "https://www.googleapis.com/auth/photoslibrary.readonly",
         "https://www.googleapis.com/auth/photoslibrary.sharing",
         "openid",
-        "email",
-        "profile"
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/userinfo.profile"
     ]
     
     # Uygulama Mantığı Ayarları
-    TRASH_ALBUM_TITLE = "PhotoSwipe Çöp Kutusu" # Değiştirilebilir 
+    TRASH_ALBUM_TITLE = "PhotoSwipe Çöp Kutusu" # Değiştirilebilir

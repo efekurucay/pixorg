@@ -3,6 +3,7 @@ import requests
 from flask import Flask, session, redirect, request, url_for, render_template, jsonify
 from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request as GoogleAuthRequest, AuthorizedSession
 from functools import wraps
 
 from config import Config
@@ -36,10 +37,24 @@ def get_authorized_session():
     """Kimlik doğrulaması yapılmış ve kullanıma hazır bir requests session nesnesi döner."""
     if 'credentials' not in session:
         return None
-    creds = Credentials(**session['credentials'])
     
-    authed_session = requests.Session()
-    authed_session.headers.update({'Authorization': f'Bearer {creds.token}'})
+    creds = Credentials(**session['credentials'])
+
+    # Token'ın süresinin dolup dolmadığını kontrol et ve gerekirse yenile
+    if creds.expired and creds.refresh_token:
+        creds.refresh(GoogleAuthRequest())
+        # Yenilenen credentials'ı session'a geri kaydet
+        session['credentials'] = {
+            'token': creds.token,
+            'refresh_token': creds.refresh_token,
+            'token_uri': creds.token_uri,
+            'client_id': creds.client_id,
+            'client_secret': creds.client_secret,
+            'scopes': creds.scopes
+        }
+
+    # google-auth kütüphanesinin kendi yetkilendirilmiş session nesnesini kullan
+    authed_session = AuthorizedSession(creds)
     return authed_session
 
 def _move_media_to_album(g_session, media_id, album_id):
@@ -89,7 +104,7 @@ def login():
         scopes=app.config['PHOTOS_SCOPE']
     )
     flow.redirect_uri = url_for('auth_callback', _external=True)
-    authorization_url, state = flow.authorization_url(access_type='offline', include_granted_scopes='true')
+    authorization_url, state = flow.authorization_url(access_type='offline', include_granted_scopes='true', prompt='consent')
     session['state'] = state
     return redirect(authorization_url)
 
@@ -184,12 +199,29 @@ def get_random_media():
     g_session = get_authorized_session()
     if not g_session:
         return api_error('Oturum yetkilendirilemedi.', 401)
-    search_payload = {'pageSize': 100} # API'den en son 100 medyayı getirir.
-    response = g_session.post("https://photoslibrary.googleapis.com/v1/mediaItems:search", json=search_payload)
     
-    if response.status_code == 200:
+    # Google Photos API'si boş aramalara izin vermez.
+    # Tüm medya türlerini içeren bir filtre ekleyerek geçerli bir arama yapıyoruz.
+    search_payload = {
+        'pageSize': 100,
+        'filters': {
+            'mediaTypeFilter': {
+                'mediaTypes': ['ALL_MEDIA']
+            }
+        }
+    }
+    
+    try:
+        response = g_session.post("https://photoslibrary.googleapis.com/v1/mediaItems:search", json=search_payload)
+        response.raise_for_status()  # HTTP 2xx olmayan durumlar için hata fırlat
+        
         return response.json()
-    return api_error('Medya getirilemedi.', response.status_code)
+    except requests.exceptions.HTTPError as err:
+        print(f"DEBUG - API Hatası: {err.response.text}")
+        return api_error(f"Medya getirilemedi: {err.response.json().get('error', {}).get('message', 'Bilinmeyen API hatası')}", err.response.status_code)
+    except Exception as e:
+        print(f"DEBUG - Genel Hata: {e}")
+        return api_error(f"Beklenmedik bir hata oluştu: {e}", 500)
 
 @app.route('/api/action', methods=['POST'])
 @login_required
@@ -223,7 +255,7 @@ def perform_action():
 @app.route('/api/settings', methods=['GET'])
 @login_required
 def get_settings_data():
-    user = User.query.get(session['user_db_id'])
+    user = db.session.get(User, session.get('user_db_id'))
     if not user:
         return api_error('Kullanıcı bulunamadı.', 404)
     g_session = get_authorized_session()
@@ -246,7 +278,7 @@ def get_settings_data():
 @login_required
 def save_shortcut():
     data = request.json
-    user = User.query.get(session['user_db_id'])
+    user = db.session.get(User, session.get('user_db_id'))
     if not user:
         return api_error('Kullanıcı bulunamadı.', 404)
     if not data or 'key' not in data or 'action' not in data:
@@ -266,7 +298,7 @@ def save_shortcut():
 @app.route('/api/settings/shortcut/<int:shortcut_id>', methods=['DELETE'])
 @login_required
 def delete_shortcut(shortcut_id):
-    user = User.query.get(session['user_db_id'])
+    user = db.session.get(User, session.get('user_db_id'))
     if not user:
         return api_error('Kullanıcı bulunamadı.', 404)
     shortcut = Shortcut.query.filter_by(id=shortcut_id, user_id=user.id).first()
