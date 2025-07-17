@@ -1,0 +1,5 @@
+Flask
+Flask-SQLAlchemy
+google-auth-oauthlib
+requests
+python-dotenv 

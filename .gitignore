@@ -1,0 +1,35 @@
+# Hassas bilgiler
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Flask instance
+instance/
+
+# Veritabanı dosyaları
+*.db
+*.sqlite
+*.sqlite3
+
+# Virtual environment
+venv/
+env/
+ENV/
+
+# IDE dosyaları
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS dosyaları
+.DS_Store
+Thumbs.db
+
+# Log dosyaları
+*.log 

@@ -1,0 +1,43 @@
+{% extends "_base.html" %}
+{% block title %}Ayarlar{% endblock %}
+
+{% block content %}
+<div id="status-message" class="alert d-none" role="alert"></div>
+
+<div class="row g-5">
+    <div class="col-md-5">
+        <h2 class="mb-3">Yeni Kısayol Ekle</h2>
+        <form id="shortcut-form">
+            <div class="mb-3">
+                <label for="key-input" class="form-label">Klavye Tuşu</label>
+                <input type="text" id="key-input" class="form-control" placeholder="Bir tuşa basın..." readonly required>
+            </div>
+            <div class="mb-3">
+                <label for="action-select" class="form-label">Eylem</label>
+                <select id="action-select" class="form-select" required>
+                    <option value="" disabled selected>Bir eylem seçin</option>
+                    <option value="trash">Çöp Kutusuna Taşı</option>
+                    <option value="album">Albüme Taşı</option>
+                </select>
+            </div>
+            <div id="album-container" class="mb-3 d-none">
+                <label for="album-select" class="form-label">Hedef Albüm</label>
+                <select id="album-select" class="form-select">
+                    <option>Yükleniyor...</option>
+                </select>
+            </div>
+            <button type="submit" class="btn btn-primary"><i class="bi bi-plus-lg me-2"></i>Kısayolu Kaydet</button>
+        </form>
+    </div>
+    <div class="col-md-7">
+        <h2 class="mb-3">Mevcut Kısayollar</h2>
+        <ul id="shortcut-list" class="list-group">
+            <li class="list-group-item">Yükleniyor...</li>
+        </ul>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+{% endblock %} 
