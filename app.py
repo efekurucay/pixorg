@@ -184,7 +184,8 @@ def logout():
 @app.route('/app')
 @login_required
 def app_main():
-    return render_template('index.html')
+    # API kısıtlamaları nedeniyle ana sayfa artık doğrudan ayarlara yönlendiriyor.
+    return redirect(url_for('settings'))
 
 @app.route('/settings')
 @login_required
@@ -193,32 +194,28 @@ def settings():
 
 # --- API ENDPOINTS (JavaScript tarafından çağrılır) ---
 
-@app.route('/api/media/random')
+@app.route('/api/media/get', methods=['POST'])
 @login_required
-def get_random_media():
+def get_media_details():
+    media_ids = request.json.get('mediaIds')
+    if not media_ids:
+        return api_error('Eksik parametre: mediaIds gerekli.', 400)
+    
     g_session = get_authorized_session()
     if not g_session:
         return api_error('Oturum yetkilendirilemedi.', 401)
     
-    # Google Photos API'si boş aramalara izin vermez.
-    # Tüm medya türlerini içeren bir filtre ekleyerek geçerli bir arama yapıyoruz.
-    search_payload = {
-        'pageSize': 100,
-        'filters': {
-            'mediaTypeFilter': {
-                'mediaTypes': ['ALL_MEDIA']
-            }
-        }
-    }
+    # Google Photos API'si batchGet ile tek seferde 50 öğe alabilir.
+    url = "https://photoslibrary.googleapis.com/v1/mediaItems:batchGet"
+    params = {'mediaItemIds': media_ids}
     
     try:
-        response = g_session.post("https://photoslibrary.googleapis.com/v1/mediaItems:search", json=search_payload)
-        response.raise_for_status()  # HTTP 2xx olmayan durumlar için hata fırlat
-        
-        return response.json()
+        response = g_session.get(url, params=params)
+        response.raise_for_status()
+        return jsonify(response.json())
     except requests.exceptions.HTTPError as err:
         print(f"DEBUG - API Hatası: {err.response.text}")
-        return api_error(f"Medya getirilemedi: {err.response.json().get('error', {}).get('message', 'Bilinmeyen API hatası')}", err.response.status_code)
+        return api_error(f"Medya detayları getirilemedi: {err.response.json().get('error', {}).get('message', 'Bilinmeyen API hatası')}", err.response.status_code)
     except Exception as e:
         print(f"DEBUG - Genel Hata: {e}")
         return api_error(f"Beklenmedik bir hata oluştu: {e}", 500)

@@ -1,167 +1,37 @@
 "use strict";
 
-document.addEventListener('DOMContentLoaded', () => {
-    // URL'e göre doğru JS modülünü çalıştır
-    if (window.location.pathname.includes('/app')) {
-        AppPage.init();
-    } else if (window.location.pathname.includes('/settings')) {
-        SettingsPage.init();
-    }
-});
-
-// GENEL FONKSİYONLAR
-function showStatusMessage(message, isError = false) {
+// --- GENEL FONKSİYONLAR ---
+function showStatusMessage(message, isError = false, duration = 3000) {
     const statusEl = document.getElementById('status-message');
     if (!statusEl) return;
     statusEl.textContent = message;
-    statusEl.className = 'alert'; // Önce sınıfları sıfırla
+    statusEl.className = 'alert';
     statusEl.classList.add(isError ? 'alert-danger' : 'alert-success');
     statusEl.classList.remove('d-none');
-    setTimeout(() => {
-        statusEl.classList.add('d-none');
-    }, 3000);
+    setTimeout(() => statusEl.classList.add('d-none'), duration);
 }
 
-// ANA UYGULAMA SAYFASI MANTIĞI
-const AppPage = {
-    mediaCache: [],
-    userShortcuts: {},
-    currentMediaItem: null,
-
-    elements: {
-        loadingSpinner: null,
-        mediaDisplay: null,
-        videoDisplay: null,
-        mediaInfo: null
-    },
-
-    async init() {
-        // Elementleri bir kere bul ve sakla
-        this.elements.loadingSpinner = document.getElementById('loading-spinner');
-        this.elements.mediaDisplay = document.getElementById('media-display');
-        this.elements.videoDisplay = document.getElementById('video-display');
-        this.elements.mediaInfo = document.getElementById('media-info');
-        
-        await this.loadShortcuts();
-        this.setupKeyListener();
-        this.loadNextMedia();
-    },
-
-    async loadShortcuts() {
-        try {
-            const response = await fetch('/api/settings');
-            if (!response.ok) throw new Error('Kısayollar yüklenemedi.');
-            const data = await response.json();
-            this.userShortcuts = data.shortcuts.reduce((acc, s) => {
-                acc[s.key] = { action: s.action, albumId: s.album_id, albumName: s.album_name };
-                return acc;
-            }, {});
-        } catch (error) {
-            showStatusMessage(error.message, true);
-        }
-    },
-
-    async fetchMedia() {
-        this.elements.loadingSpinner.classList.remove('d-none');
-        this.elements.mediaDisplay.classList.add('d-none');
-        this.elements.videoDisplay.classList.add('d-none');
-        
-        try {
-            const response = await fetch('/api/media/random');
-            if (!response.ok) throw new Error('Yeni medya yüklenirken bir hata oluştu.');
-            const data = await response.json();
-            if (data.mediaItems && data.mediaItems.length > 0) {
-                this.mediaCache = data.mediaItems;
-            } else {
-                throw new Error('Gösterilecek başka medya kalmadı.');
-            }
-        } catch (error) {
-            this.elements.loadingSpinner.classList.add('d-none');
-            showStatusMessage(error.message, true);
-        }
-    },
-
-    async loadNextMedia() {
-        if (this.mediaCache.length === 0) {
-            await this.fetchMedia();
-            if (this.mediaCache.length === 0) return; // Fetch başarısız olduysa devam etme
-        }
-        
-        // Rastgele bir öğe seç ve önbellekten çıkar
-        const randomIndex = Math.floor(Math.random() * this.mediaCache.length);
-        this.currentMediaItem = this.mediaCache.splice(randomIndex, 1)[0];
-        
-        this.displayMedia(this.currentMediaItem);
-    },
-    
-    displayMedia(mediaItem) {
-        const { mediaDisplay, videoDisplay, loadingSpinner, mediaInfo } = this.elements;
-        mediaDisplay.classList.add('d-none');
-        videoDisplay.classList.add('d-none');
-
-        const isVideo = mediaItem.mimeType.startsWith('video');
-        const displayElement = isVideo ? videoDisplay : mediaDisplay;
-
-        // Daha iyi kalite için URL'i düzenle
-        displayElement.src = `${mediaItem.baseUrl}=${isVideo ? 'dv' : 'w1600-h900'}`;
-
-        displayElement.onload = displayElement.oncanplay = () => {
-            loadingSpinner.classList.add('d-none');
-            displayElement.classList.remove('d-none');
-            const creationDate = new Date(mediaItem.mediaMetadata.creationTime);
-            mediaInfo.textContent = `${mediaItem.filename} - ${creationDate.toLocaleDateString('tr-TR')}`;
-        };
-    },
-
-    setupKeyListener() {
-        document.addEventListener('keydown', (e) => this.handleKeyPress(e));
-    },
-
-    async handleKeyPress(event) {
-        const shortcut = this.userShortcuts[event.key];
-        if (!shortcut || !this.currentMediaItem) return;
-        event.preventDefault();
-
-        try {
-            const response = await fetch('/api/action', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    mediaId: this.currentMediaItem.id,
-                    action: shortcut.action,
-                    albumId: shortcut.albumId // action 'album' değilse backend bunu dikkate almaz
-                })
-            });
-            const result = await response.json();
-            if (!response.ok) throw new Error(result.error || 'İşlem başarısız.');
-            
-            let successMessage = shortcut.action === 'trash' ? 
-                'Çöp kutusuna taşındı.' : `"${shortcut.albumName}" albümüne taşındı.`;
-            showStatusMessage(successMessage);
-            this.loadNextMedia();
-            
-        } catch (error) {
-            showStatusMessage(error.message, true);
-        }
-    }
-};
-
-// AYARLAR SAYFASI MANTIĞI
+// --- AYARLAR SAYFASI MANTIĞI ---
 const SettingsPage = {
     elements: {},
-    
+    userShortcuts: {},
+
     init() {
-        Object.assign(this.elements, {
+        this.cacheElements();
+        this.addEventListeners();
+        this.loadSettings();
+    },
+
+    cacheElements() {
+        this.elements = {
             form: document.getElementById('shortcut-form'),
             keyInput: document.getElementById('key-input'),
             actionSelect: document.getElementById('action-select'),
             albumContainer: document.getElementById('album-container'),
             albumSelect: document.getElementById('album-select'),
-            shortcutList: document.getElementById('shortcut-list')
-        });
-        
-        this.addEventListeners();
-        this.loadSettings();
+            shortcutList: document.getElementById('shortcut-list'),
+            pickPhotosBtn: document.getElementById('pick-photos-btn'),
+        };
     },
 
     addEventListeners() {
@@ -172,29 +42,38 @@ const SettingsPage = {
         this.elements.actionSelect.addEventListener('change', () => {
             this.elements.albumContainer.classList.toggle('d-none', this.elements.actionSelect.value !== 'album');
         });
-        this.elements.form.addEventListener('submit', (e) => this.saveShortcut(e));
+        this.elements.form.addEventListener('submit', e => this.saveShortcut(e));
+        this.elements.pickPhotosBtn.addEventListener('click', () => PhotoOrganizer.start());
     },
 
     async loadSettings() {
         try {
             const response = await fetch('/api/settings');
-            if(!response.ok) throw new Error('Ayarlar yüklenemedi.');
+            if (!response.ok) throw new Error('Ayarlar yüklenemedi.');
             const data = await response.json();
             this.renderAlbums(data.albums);
             this.renderShortcuts(data.shortcuts);
-        } catch(error) {
+            this.userShortcuts = data.shortcuts.reduce((acc, s) => {
+                acc[s.key] = { action: s.action, albumId: s.album_id, albumName: s.album_name };
+                return acc;
+            }, {});
+        } catch (error) {
             showStatusMessage(error.message, true);
         }
     },
-    
+
     renderAlbums(albums) {
+        if (!albums || albums.length === 0) {
+            this.elements.albumSelect.innerHTML = '<option>Yazılabilir albüm bulunamadı.</option>';
+            return;
+        }
         this.elements.albumSelect.innerHTML = albums
             .filter(album => album.isWriteable)
             .map(album => `<option value="${album.id}">${album.title}</option>`).join('');
     },
 
     renderShortcuts(shortcuts) {
-        if(shortcuts.length === 0) {
+        if (shortcuts.length === 0) {
             this.elements.shortcutList.innerHTML = '<li class="list-group-item text-muted">Henüz bir kısayol eklenmemiş.</li>';
             return;
         }
@@ -215,7 +94,7 @@ const SettingsPage = {
             album_id: actionSelect.value === 'album' ? albumSelect.value : null,
             album_name: actionSelect.value === 'album' ? albumSelect.options[albumSelect.selectedIndex].text : null
         };
-        if(!payload.key || !payload.action) {
+        if (!payload.key || !payload.action) {
             showStatusMessage("Lütfen bir tuş ve eylem seçin.", true);
             return;
         }
@@ -227,29 +106,170 @@ const SettingsPage = {
                 body: JSON.stringify(payload)
             });
             const result = await response.json();
-            if(!response.ok) throw new Error(result.error || 'Kısayol kaydedilemedi.');
-            
+            if (!response.ok) throw new Error(result.error || 'Kısayol kaydedilemedi.');
             showStatusMessage("Kısayol başarıyla kaydedildi.");
             this.elements.form.reset();
             this.elements.albumContainer.classList.add('d-none');
-            this.loadSettings(); // Listeyi yenile
-
-        } catch(error) {
+            this.loadSettings();
+        } catch (error) {
             showStatusMessage(error.message, true);
         }
     },
 
     async deleteShortcut(id) {
-        if(!confirm('Bu kısayolu silmek istediğinizden emin misiniz?')) return;
+        if (!confirm('Bu kısayolu silmek istediğinizden emin misiniz?')) return;
         try {
             const response = await fetch(`/api/settings/shortcut/${id}`, { method: 'DELETE' });
             const result = await response.json();
-            if(!response.ok) throw new Error(result.error || 'Kısayol silinemedi.');
-            
+            if (!response.ok) throw new Error(result.error || 'Kısayol silinemedi.');
             showStatusMessage('Kısayol silindi.');
-            this.loadSettings(); // Listeyi yenile
-        } catch(error) {
+            this.loadSettings();
+        } catch (error) {
             showStatusMessage(error.message, true);
         }
     }
-}; 
+};
+
+// --- FOTOĞRAF DÜZENLEYİCİ MANTIĞI ---
+const PhotoOrganizer = {
+    elements: {},
+    mediaQueue: [],
+    currentMediaIndex: -1,
+    googleToken: null,
+
+    start() {
+        this.cacheElements();
+        this.loadGoogleApis();
+    },
+
+    cacheElements() {
+        this.elements = {
+            container: document.getElementById('organizer-container'),
+            loadingSpinner: document.getElementById('loading-spinner'),
+            mediaDisplay: document.getElementById('media-display'),
+            videoDisplay: document.getElementById('video-display'),
+            mediaInfo: document.getElementById('media-info'),
+            progressInfo: document.getElementById('progress-info'),
+        };
+    },
+
+    loadGoogleApis() {
+        gapi.load('client:picker', async () => {
+            this.googleToken = gapi.client.oauth2.getAuthInstance().currentUser.get().getAuthResponse(true).access_token;
+            this.createPicker();
+        });
+    },
+
+    createPicker() {
+        const view = new google.picker.View(google.picker.ViewId.PHOTOS);
+        view.setMimeTypes("image/*,video/*");
+        const picker = new google.picker.PickerBuilder()
+            .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
+            .setAppId(window.googleApiClientId)
+            .setOAuthToken(this.googleToken)
+            .addView(view)
+            .setCallback(this.pickerCallback.bind(this))
+            .build();
+        picker.setVisible(true);
+    },
+
+    async pickerCallback(data) {
+        if (data[google.picker.Action.PICKED]) {
+            const mediaIds = data[google.picker.Response.DOCUMENTS].map(doc => doc.id);
+            if (mediaIds.length === 0) return;
+            
+            this.elements.container.classList.remove('d-none');
+            this.elements.loadingSpinner.classList.remove('d-none');
+            
+            try {
+                const response = await fetch('/api/media/get', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mediaIds })
+                });
+                if (!response.ok) throw new Error('Seçilen medya bilgileri alınamadı.');
+                const result = await response.json();
+                this.mediaQueue = result.mediaItemResults.map(item => item.mediaItem).filter(Boolean);
+                this.currentMediaIndex = 0;
+                this.setupKeyListener();
+                this.displayCurrentMedia();
+            } catch (error) {
+                showStatusMessage(error.message, true);
+                this.elements.loadingSpinner.classList.add('d-none');
+            }
+        }
+    },
+
+    displayCurrentMedia() {
+        this.elements.loadingSpinner.classList.add('d-none');
+        
+        if (this.currentMediaIndex >= this.mediaQueue.length) {
+            this.endSession();
+            return;
+        }
+
+        const mediaItem = this.mediaQueue[this.currentMediaIndex];
+        const { mediaDisplay, videoDisplay, mediaInfo, progressInfo } = this.elements;
+        mediaDisplay.classList.add('d-none');
+        videoDisplay.classList.add('d-none');
+
+        const isVideo = mediaItem.mimeType.startsWith('video');
+        const displayElement = isVideo ? videoDisplay : mediaDisplay;
+        
+        displayElement.src = `${mediaItem.baseUrl}=${isVideo ? 'dv' : 'w1600-h900'}`;
+        displayElement.classList.remove('d-none');
+        
+        const creationDate = new Date(mediaItem.mediaMetadata.creationTime);
+        mediaInfo.textContent = `${mediaItem.filename} - ${creationDate.toLocaleDateString('tr-TR')}`;
+        progressInfo.textContent = `İlerleme: ${this.currentMediaIndex + 1} / ${this.mediaQueue.length}`;
+    },
+
+    setupKeyListener() {
+        document.addEventListener('keydown', this.handleKeyPress.bind(this));
+    },
+
+    async handleKeyPress(event) {
+        if (this.currentMediaIndex === -1) return;
+
+        const shortcut = SettingsPage.userShortcuts[event.key];
+        const mediaItem = this.mediaQueue[this.currentMediaIndex];
+        if (!shortcut || !mediaItem) return;
+        
+        event.preventDefault();
+
+        try {
+            const response = await fetch('/api/action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    mediaId: mediaItem.id,
+                    action: shortcut.action,
+                    albumId: shortcut.albumId
+                })
+            });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error || 'İşlem başarısız.');
+            
+            const successMessage = shortcut.action === 'trash' ?
+                'Çöp kutusuna taşındı.' : `"${shortcut.albumName}" albümüne taşındı.`;
+            showStatusMessage(successMessage);
+            
+            this.currentMediaIndex++;
+            this.displayCurrentMedia();
+            
+        } catch (error) {
+            showStatusMessage(error.message, true);
+        }
+    },
+
+    endSession() {
+        showStatusMessage('Tüm seçilen fotoğraflar düzenlendi!', false, 5000);
+        this.elements.container.classList.add('d-none');
+        this.currentMediaIndex = -1;
+        this.mediaQueue = [];
+        document.removeEventListener('keydown', this.handleKeyPress.bind(this));
+    }
+};
+
+// Sayfa yüklendiğinde başlat
+document.addEventListener('DOMContentLoaded', () => SettingsPage.init());
